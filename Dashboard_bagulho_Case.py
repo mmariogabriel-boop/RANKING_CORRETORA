@@ -38,7 +38,7 @@ st.set_page_config(
 
 st.title("📊 Entradas x Saídas de Vidas")
 st.caption(
-    "Dashboard baseado no relatório consolidado por mês, corretora e CNPJ."
+    "Dashboard baseado no relatório consolidado por mês e corretora."
 )
 
 
@@ -561,15 +561,13 @@ def estilos_pdf():
 # =========================================================
 def tabela_filtros_pdf(
     ano_selecionado,
-    corretora_selecionada,
-    cnpj_selecionado
+    corretora_selecionada
 ):
     dados = [
         ["Gerado em", datetime.now().strftime("%d/%m/%Y %H:%M")],
         ["Base", "Relatoriov2.xlsx"],
         ["Ano", str(ano_selecionado)],
-        ["Corretora", str(corretora_selecionada)],
-        ["CNPJ", str(cnpj_selecionado)]
+        ["Corretora", str(corretora_selecionada)]
     ]
 
     tabela = Table(
@@ -1286,35 +1284,12 @@ def tabela_mensal_corretora_pdf(mensal):
     return tabela
 
 
-def texto_cnpjs_corretora(df_corretora):
-    cnpjs = sorted(
-        df_corretora["CNPJ"]
-        .dropna()
-        .astype(str)
-        .unique()
-        .tolist()
-    )
-
-    if not cnpjs:
-        return "CNPJ: Nao informado"
-
-    if len(cnpjs) <= 3:
-        return "CNPJ: " + " | ".join(cnpjs)
-
-    return (
-        "CNPJs: "
-        + " | ".join(cnpjs[:3])
-        + f" | +{len(cnpjs) - 3} outro(s)"
-    )
-
-
 # =========================================================
 # PDF COMPLETO - SAÚDE + ODONTO
 # =========================================================
 def gerar_pdf_top10_completo(
     ano_selecionado,
     corretora_selecionada,
-    cnpj_selecionado,
     top_entradas_saude,
     top_saidas_saude,
     top_entradas_odonto,
@@ -1399,8 +1374,7 @@ def gerar_pdf_top10_completo(
     story.append(
         tabela_filtros_pdf(
             ano_selecionado=ano_selecionado,
-            corretora_selecionada=corretora_selecionada,
-            cnpj_selecionado=cnpj_selecionado
+            corretora_selecionada=corretora_selecionada
         )
     )
 
@@ -1861,13 +1835,6 @@ def gerar_pdf_top10_completo(
                 )
 
             story.append(
-                Paragraph(
-                    texto_cnpjs_corretora(df_corretora),
-                    texto
-                )
-            )
-
-            story.append(
                 Spacer(1, 0.18 * cm)
             )
 
@@ -2282,10 +2249,7 @@ def montar_lamina(
 
     corretoras = (
         df.groupby(
-            [
-                "CNPJ",
-                "Corretora"
-            ],
+            "Corretora",
             as_index=False
         )[
             [
@@ -2322,7 +2286,6 @@ def montar_lamina(
 
     corretoras = corretoras[
         [
-            "CNPJ",
             "Corretora",
             "Vida Nova",
             "Movimentação",
@@ -2362,7 +2325,6 @@ df = carregar_base()
 # =========================================================
 colunas_obrigatorias = [
     "Mês",
-    "CNPJ",
     "Corretora",
     "Vida Nova Saúde",
     "Movimentação Saúde",
@@ -2409,13 +2371,6 @@ df["Mês"] = pd.to_datetime(
 df = df[
     df["Mês"].notna()
 ].copy()
-
-df["CNPJ"] = (
-    df["CNPJ"]
-    .fillna("NÃO INFORMADO")
-    .astype(str)
-    .str.strip()
-)
 
 df["Corretora"] = (
     df["Corretora"]
@@ -2485,24 +2440,6 @@ if corretora_selecionada != "TODAS":
     df_filtrado = df_filtrado[
         df_filtrado["Corretora"]
         == corretora_selecionada
-    ].copy()
-
-cnpjs = sorted(
-    df_filtrado["CNPJ"]
-    .dropna()
-    .unique()
-    .tolist()
-)
-
-cnpj_selecionado = st.sidebar.selectbox(
-    "CNPJ",
-    ["TODOS"] + cnpjs
-)
-
-if cnpj_selecionado != "TODOS":
-    df_filtrado = df_filtrado[
-        df_filtrado["CNPJ"]
-        == cnpj_selecionado
     ].copy()
 
 if df_filtrado.empty:
@@ -2596,7 +2533,6 @@ assinatura_base = int(
 chave_pdf_atual = (
     int(ano_selecionado),
     str(corretora_selecionada),
-    str(cnpj_selecionado),
     assinatura_base
 )
 
@@ -2614,7 +2550,6 @@ if st.button(
         pdf_completo = gerar_pdf_top10_completo(
             ano_selecionado=ano_selecionado,
             corretora_selecionada=corretora_selecionada,
-            cnpj_selecionado=cnpj_selecionado,
             top_entradas_saude=top_entradas_saude,
             top_saidas_saude=top_saidas_saude,
             top_entradas_odonto=top_entradas_odonto,
