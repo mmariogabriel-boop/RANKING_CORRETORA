@@ -5,6 +5,7 @@ from datetime import datetime
 
 import streamlit as st
 import pandas as pd
+import numpy as np
 import plotly.graph_objects as go
 
 import matplotlib.pyplot as plt
@@ -74,6 +75,32 @@ def nome_curto(texto, limite=42):
     if len(texto) <= limite:
         return texto
     return texto[: limite - 3] + "..."
+
+
+def localizar_logo_mediatorie():
+    """
+    Procura a logo na pasta do script e, como segunda opção,
+    no diretório atual.
+    """
+    pasta_script = os.path.dirname(os.path.abspath(__file__))
+
+    nomes = [
+        "logo_mediatorie.png",
+        "mediatorie.png",
+        "logo.png"
+    ]
+
+    for nome in nomes:
+        candidatos = [
+            os.path.join(pasta_script, nome),
+            nome
+        ]
+
+        for caminho in candidatos:
+            if os.path.exists(caminho):
+                return caminho
+
+    return None
 
 
 # =========================================================
@@ -787,6 +814,501 @@ def tabela_ranking_pdf(
 
 
 # =========================================================
+# PDF - DETALHAMENTO POR CORRETORA
+# =========================================================
+def preparar_mensal_corretora_pdf(df_corretora, competencias):
+    """
+    Consolida uma corretora por competência.
+    O período é reindexado para que meses sem movimento apareçam com zero.
+    """
+
+    colunas_base = [
+        "Vida Nova Saúde",
+        "Movimentação Saúde",
+        "Saída Saúde",
+        "Saldo Saúde",
+        "Vida Nova Odonto",
+        "Movimentação Odonto",
+        "Saída Odonto",
+        "Saldo Odonto",
+        "Saldo Geral"
+    ]
+
+    mensal = (
+        df_corretora
+        .groupby("Mês")[colunas_base]
+        .sum()
+        .reindex(competencias, fill_value=0)
+        .reset_index()
+    )
+
+    mensal["Entradas Saúde"] = (
+        mensal["Vida Nova Saúde"]
+        + mensal["Movimentação Saúde"]
+    )
+
+    mensal["Entradas Odonto"] = (
+        mensal["Vida Nova Odonto"]
+        + mensal["Movimentação Odonto"]
+    )
+
+    # Recalcula os saldos para garantir coerência visual no PDF.
+    mensal["Saldo Saúde"] = (
+        mensal["Entradas Saúde"]
+        - mensal["Saída Saúde"]
+    )
+
+    mensal["Saldo Odonto"] = (
+        mensal["Entradas Odonto"]
+        - mensal["Saída Odonto"]
+    )
+
+    mensal["Saldo Geral"] = (
+        mensal["Saldo Saúde"]
+        + mensal["Saldo Odonto"]
+    )
+
+    return mensal
+
+
+def resumo_corretora_pdf(df_corretora):
+    """Retorna uma tabela-resumo de Saúde, Odonto e Total."""
+
+    vida_nova_saude = df_corretora["Vida Nova Saúde"].sum()
+    mov_saude = df_corretora["Movimentação Saúde"].sum()
+    saida_saude = df_corretora["Saída Saúde"].sum()
+    entrada_saude = vida_nova_saude + mov_saude
+    saldo_saude = entrada_saude - saida_saude
+    evasao_saude = percentual(saida_saude, entrada_saude)
+
+    vida_nova_odonto = df_corretora["Vida Nova Odonto"].sum()
+    mov_odonto = df_corretora["Movimentação Odonto"].sum()
+    saida_odonto = df_corretora["Saída Odonto"].sum()
+    entrada_odonto = vida_nova_odonto + mov_odonto
+    saldo_odonto = entrada_odonto - saida_odonto
+    evasao_odonto = percentual(saida_odonto, entrada_odonto)
+
+    vida_nova_total = vida_nova_saude + vida_nova_odonto
+    mov_total = mov_saude + mov_odonto
+    entrada_total = entrada_saude + entrada_odonto
+    saida_total = saida_saude + saida_odonto
+    saldo_total = saldo_saude + saldo_odonto
+    evasao_total = percentual(saida_total, entrada_total)
+
+    dados = [
+        [
+            "Produto",
+            "Vida Nova",
+            "Movimentacao",
+            "Entradas",
+            "Saidas",
+            "Saldo",
+            "% Evasao"
+        ],
+        [
+            "Saude",
+            formatar_inteiro(vida_nova_saude),
+            formatar_inteiro(mov_saude),
+            formatar_inteiro(entrada_saude),
+            formatar_inteiro(saida_saude),
+            formatar_inteiro(saldo_saude),
+            formatar_percentual(evasao_saude)
+        ],
+        [
+            "Odonto",
+            formatar_inteiro(vida_nova_odonto),
+            formatar_inteiro(mov_odonto),
+            formatar_inteiro(entrada_odonto),
+            formatar_inteiro(saida_odonto),
+            formatar_inteiro(saldo_odonto),
+            formatar_percentual(evasao_odonto)
+        ],
+        [
+            "Total",
+            formatar_inteiro(vida_nova_total),
+            formatar_inteiro(mov_total),
+            formatar_inteiro(entrada_total),
+            formatar_inteiro(saida_total),
+            formatar_inteiro(saldo_total),
+            formatar_percentual(evasao_total)
+        ]
+    ]
+
+    tabela = Table(
+        dados,
+        colWidths=[
+            2.25 * cm,
+            2.25 * cm,
+            2.45 * cm,
+            2.25 * cm,
+            2.15 * cm,
+            2.15 * cm,
+            2.15 * cm
+        ]
+    )
+
+    tabela.setStyle(
+        TableStyle(
+            [
+                (
+                    "BACKGROUND",
+                    (0, 0),
+                    (-1, 0),
+                    colors.HexColor("#EFF5E6")
+                ),
+                (
+                    "TEXTCOLOR",
+                    (0, 0),
+                    (-1, 0),
+                    colors.HexColor(VERDE_ESCURO)
+                ),
+                (
+                    "FONTNAME",
+                    (0, 0),
+                    (-1, 0),
+                    "Helvetica-Bold"
+                ),
+                (
+                    "FONTNAME",
+                    (0, -1),
+                    (-1, -1),
+                    "Helvetica-Bold"
+                ),
+                (
+                    "ALIGN",
+                    (1, 0),
+                    (-1, -1),
+                    "CENTER"
+                ),
+                (
+                    "VALIGN",
+                    (0, 0),
+                    (-1, -1),
+                    "MIDDLE"
+                ),
+                (
+                    "GRID",
+                    (0, 0),
+                    (-1, -1),
+                    0.3,
+                    colors.HexColor("#D7DDD2")
+                ),
+                (
+                    "ROWBACKGROUNDS",
+                    (0, 1),
+                    (-1, -1),
+                    [
+                        colors.white,
+                        colors.HexColor("#F7F8F6")
+                    ]
+                ),
+                (
+                    "FONTSIZE",
+                    (0, 0),
+                    (-1, -1),
+                    7.0
+                ),
+                (
+                    "TOPPADDING",
+                    (0, 0),
+                    (-1, -1),
+                    5
+                ),
+                (
+                    "BOTTOMPADDING",
+                    (0, 0),
+                    (-1, -1),
+                    5
+                )
+            ]
+        )
+    )
+
+    return tabela
+
+
+def grafico_corretora_pdf(mensal, corretora):
+    """
+    Gráfico mensal de entradas x saídas para Saúde e Odonto.
+    """
+
+    if mensal.empty:
+        return None
+
+    labels = mensal["Mês"].dt.strftime("%m/%Y").tolist()
+    x = np.arange(len(labels))
+    largura = 0.20
+
+    fig, ax = plt.subplots(figsize=(9.4, 3.5))
+
+    series = [
+        (
+            mensal["Entradas Saúde"].astype(float).tolist(),
+            -1.5 * largura,
+            "Entradas Saude",
+            VERDE_MEDIATORIE
+        ),
+        (
+            mensal["Saída Saúde"].astype(float).tolist(),
+            -0.5 * largura,
+            "Saidas Saude",
+            CINZA
+        ),
+        (
+            mensal["Entradas Odonto"].astype(float).tolist(),
+            0.5 * largura,
+            "Entradas Odonto",
+            VERDE_ESCURO
+        ),
+        (
+            mensal["Saída Odonto"].astype(float).tolist(),
+            1.5 * largura,
+            "Saidas Odonto",
+            "#A9ADAA"
+        )
+    ]
+
+    maior = 0
+
+    for valores, deslocamento, legenda, cor in series:
+        barras = ax.bar(
+            x + deslocamento,
+            valores,
+            width=largura,
+            label=legenda,
+            color=cor
+        )
+
+        if valores:
+            maior = max(maior, max(valores))
+
+        for barra, valor in zip(barras, valores):
+            if valor > 0:
+                ax.text(
+                    barra.get_x() + barra.get_width() / 2,
+                    barra.get_height() + max(maior * 0.012, 0.25),
+                    formatar_inteiro(valor),
+                    ha="center",
+                    va="bottom",
+                    fontsize=5.5,
+                    rotation=0
+                )
+
+    ax.set_title(
+        "Entradas x Saidas por competencia",
+        loc="left",
+        fontsize=10.5,
+        fontweight="bold"
+    )
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(
+        labels,
+        rotation=35,
+        ha="right",
+        fontsize=7
+    )
+
+    ax.tick_params(
+        axis="y",
+        labelsize=7
+    )
+
+    ax.set_ylabel(
+        "Quantidade de vidas",
+        fontsize=7
+    )
+
+    ax.grid(
+        axis="y",
+        alpha=0.18
+    )
+
+    ax.set_axisbelow(True)
+
+    ax.legend(
+        fontsize=6.3,
+        ncol=4,
+        loc="upper center",
+        bbox_to_anchor=(0.5, 1.02),
+        frameon=False
+    )
+
+    for lado in [
+        "top",
+        "right",
+        "left"
+    ]:
+        ax.spines[lado].set_visible(False)
+
+    if maior > 0:
+        ax.set_ylim(
+            0,
+            maior * 1.20 + 1
+        )
+
+    plt.tight_layout()
+
+    buffer = BytesIO()
+
+    fig.savefig(
+        buffer,
+        format="png",
+        dpi=135,
+        bbox_inches="tight",
+        transparent=False
+    )
+
+    plt.close(fig)
+    buffer.seek(0)
+
+    return buffer
+
+
+def tabela_mensal_corretora_pdf(mensal):
+    """Tabela consolidada por competência para uma corretora."""
+
+    _, _, _, _, estilo_pequeno = estilos_pdf()
+
+    dados = [
+        [
+            "Competencia",
+            "Entr. Saude",
+            "Saida Saude",
+            "Saldo Saude",
+            "Entr. Odonto",
+            "Saida Odonto",
+            "Saldo Odonto",
+            "Saldo Geral"
+        ]
+    ]
+
+    for _, linha in mensal.iterrows():
+        dados.append(
+            [
+                linha["Mês"].strftime("%m/%Y"),
+                formatar_inteiro(linha["Entradas Saúde"]),
+                formatar_inteiro(linha["Saída Saúde"]),
+                formatar_inteiro(linha["Saldo Saúde"]),
+                formatar_inteiro(linha["Entradas Odonto"]),
+                formatar_inteiro(linha["Saída Odonto"]),
+                formatar_inteiro(linha["Saldo Odonto"]),
+                formatar_inteiro(linha["Saldo Geral"])
+            ]
+        )
+
+    tabela = Table(
+        dados,
+        colWidths=[
+            2.0 * cm,
+            2.15 * cm,
+            2.0 * cm,
+            2.0 * cm,
+            2.15 * cm,
+            2.0 * cm,
+            2.0 * cm,
+            2.0 * cm
+        ],
+        repeatRows=1
+    )
+
+    tabela.setStyle(
+        TableStyle(
+            [
+                (
+                    "BACKGROUND",
+                    (0, 0),
+                    (-1, 0),
+                    colors.HexColor(VERDE_MEDIATORIE)
+                ),
+                (
+                    "TEXTCOLOR",
+                    (0, 0),
+                    (-1, 0),
+                    colors.white
+                ),
+                (
+                    "FONTNAME",
+                    (0, 0),
+                    (-1, 0),
+                    "Helvetica-Bold"
+                ),
+                (
+                    "ALIGN",
+                    (0, 0),
+                    (-1, -1),
+                    "CENTER"
+                ),
+                (
+                    "VALIGN",
+                    (0, 0),
+                    (-1, -1),
+                    "MIDDLE"
+                ),
+                (
+                    "FONTSIZE",
+                    (0, 0),
+                    (-1, -1),
+                    6.3
+                ),
+                (
+                    "GRID",
+                    (0, 0),
+                    (-1, -1),
+                    0.3,
+                    colors.HexColor("#D8DDD5")
+                ),
+                (
+                    "ROWBACKGROUNDS",
+                    (0, 1),
+                    (-1, -1),
+                    [
+                        colors.white,
+                        colors.HexColor("#F5F7F4")
+                    ]
+                ),
+                (
+                    "TOPPADDING",
+                    (0, 0),
+                    (-1, -1),
+                    3.5
+                ),
+                (
+                    "BOTTOMPADDING",
+                    (0, 0),
+                    (-1, -1),
+                    3.5
+                )
+            ]
+        )
+    )
+
+    return tabela
+
+
+def texto_cnpjs_corretora(df_corretora):
+    cnpjs = sorted(
+        df_corretora["CNPJ"]
+        .dropna()
+        .astype(str)
+        .unique()
+        .tolist()
+    )
+
+    if not cnpjs:
+        return "CNPJ: Nao informado"
+
+    if len(cnpjs) <= 3:
+        return "CNPJ: " + " | ".join(cnpjs)
+
+    return (
+        "CNPJs: "
+        + " | ".join(cnpjs[:3])
+        + f" | +{len(cnpjs) - 3} outro(s)"
+    )
+
+
+# =========================================================
 # PDF COMPLETO - SAÚDE + ODONTO
 # =========================================================
 def gerar_pdf_top10_completo(
@@ -796,7 +1318,8 @@ def gerar_pdf_top10_completo(
     top_entradas_saude,
     top_saidas_saude,
     top_entradas_odonto,
-    top_saidas_odonto
+    top_saidas_odonto,
+    df_detalhe
 ):
     """
     Gera UM ÚNICO PDF:
@@ -805,6 +1328,7 @@ def gerar_pdf_top10_completo(
     3 - Top 10 Saídas Saúde
     4 - Top 10 Entradas Odonto
     5 - Top 10 Saídas Odonto
+    6 em diante - Uma página individual para cada corretora
     """
 
     buffer = BytesIO()
@@ -825,16 +1349,7 @@ def gerar_pdf_top10_completo(
     # -----------------------------------------------------
     # CAPA
     # -----------------------------------------------------
-    logo_local = None
-
-    for possivel_logo in [
-        "logo_mediatorie.png",
-        "mediatorie.png",
-        "logo.png"
-    ]:
-        if os.path.exists(possivel_logo):
-            logo_local = possivel_logo
-            break
+    logo_local = localizar_logo_mediatorie()
 
     story.append(
         Spacer(
@@ -869,7 +1384,7 @@ def gerar_pdf_top10_completo(
 
     story.append(
         Paragraph(
-            "Top 10 corretoras por entradas e saidas - Saude e Odonto.",
+            "Top 10 e detalhamento individual por corretora - Saude e Odonto.",
             subtitulo
         )
     )
@@ -900,6 +1415,22 @@ def gerar_pdf_top10_completo(
         Paragraph(
             "O relatorio utiliza o mesmo recorte de filtros aplicado "
             "no dashboard no momento da geracao.",
+            texto
+        )
+    )
+
+    quantidade_corretoras_pdf = int(
+        df_detalhe["Corretora"].nunique()
+    )
+
+    story.append(
+        Spacer(1, 0.18 * cm)
+    )
+
+    story.append(
+        Paragraph(
+            f"O arquivo inclui {quantidade_corretoras_pdf} pagina(s) "
+            "de detalhamento individual por corretora.",
             texto
         )
     )
@@ -1220,6 +1751,182 @@ def gerar_pdf_top10_completo(
             destaque="Saídas"
         )
     )
+
+    # -----------------------------------------------------
+    # DETALHAMENTO INDIVIDUAL POR CORRETORA
+    # -----------------------------------------------------
+    if not df_detalhe.empty:
+        story.append(
+            PageBreak()
+        )
+
+        competencias_pdf = sorted(
+            pd.to_datetime(
+                df_detalhe["Mês"],
+                errors="coerce"
+            )
+            .dropna()
+            .unique()
+            .tolist()
+        )
+
+        corretoras_pdf = sorted(
+            df_detalhe["Corretora"]
+            .dropna()
+            .astype(str)
+            .unique()
+            .tolist()
+        )
+
+        for indice_corretora, nome_corretora in enumerate(corretoras_pdf):
+            df_corretora = df_detalhe[
+                df_detalhe["Corretora"].astype(str)
+                == nome_corretora
+            ].copy()
+
+            # Título + logo, seguindo o padrão visual do relatório.
+            if logo_local:
+                titulo_corretora = Table(
+                    [
+                        [
+                            Paragraph(
+                                nome_corretora,
+                                secao
+                            ),
+                            RLImage(
+                                logo_local,
+                                width=2.35 * cm,
+                                height=1.48 * cm
+                            )
+                        ]
+                    ],
+                    colWidths=[
+                        13.8 * cm,
+                        3.2 * cm
+                    ]
+                )
+
+                titulo_corretora.setStyle(
+                    TableStyle(
+                        [
+                            (
+                                "VALIGN",
+                                (0, 0),
+                                (-1, -1),
+                                "MIDDLE"
+                            ),
+                            (
+                                "ALIGN",
+                                (1, 0),
+                                (1, 0),
+                                "RIGHT"
+                            ),
+                            (
+                                "LEFTPADDING",
+                                (0, 0),
+                                (-1, -1),
+                                0
+                            ),
+                            (
+                                "RIGHTPADDING",
+                                (0, 0),
+                                (-1, -1),
+                                0
+                            ),
+                            (
+                                "TOPPADDING",
+                                (0, 0),
+                                (-1, -1),
+                                0
+                            ),
+                            (
+                                "BOTTOMPADDING",
+                                (0, 0),
+                                (-1, -1),
+                                0
+                            )
+                        ]
+                    )
+                )
+
+                story.append(
+                    titulo_corretora
+                )
+            else:
+                story.append(
+                    Paragraph(
+                        nome_corretora,
+                        secao
+                    )
+                )
+
+            story.append(
+                Paragraph(
+                    texto_cnpjs_corretora(df_corretora),
+                    texto
+                )
+            )
+
+            story.append(
+                Spacer(1, 0.18 * cm)
+            )
+
+            story.append(
+                resumo_corretora_pdf(df_corretora)
+            )
+
+            story.append(
+                Spacer(1, 0.22 * cm)
+            )
+
+            mensal_corretora = preparar_mensal_corretora_pdf(
+                df_corretora=df_corretora,
+                competencias=competencias_pdf
+            )
+
+            grafico_corretora = grafico_corretora_pdf(
+                mensal=mensal_corretora,
+                corretora=nome_corretora
+            )
+
+            if grafico_corretora is not None:
+                story.append(
+                    RLImage(
+                        grafico_corretora,
+                        width=17.2 * cm,
+                        height=6.15 * cm
+                    )
+                )
+
+            story.append(
+                Spacer(1, 0.12 * cm)
+            )
+
+            story.append(
+                Paragraph(
+                    "Consolidacao por competencia",
+                    ParagraphStyle(
+                        "SubsecaoCorretora",
+                        parent=texto,
+                        fontName="Helvetica-Bold",
+                        fontSize=8.2,
+                        leading=10,
+                        textColor=colors.HexColor("#333333"),
+                        spaceAfter=4
+                    )
+                )
+            )
+
+            story.append(
+                tabela_mensal_corretora_pdf(
+                    mensal_corretora
+                )
+            )
+
+            if indice_corretora < len(corretoras_pdf) - 1:
+                story.append(
+                    PageBreak()
+                )
 
     doc.build(
         story,
@@ -1864,31 +2571,73 @@ with tab_odonto:
 st.divider()
 
 st.subheader(
-    "📄 Relatório Gerencial - Top 10 Corretoras"
+    "📄 Relatório Gerencial - Top 10 + Corretoras"
+)
+
+quantidade_corretoras_pdf = int(
+    df_filtrado["Corretora"].nunique()
 )
 
 st.caption(
-    "O PDF abaixo reúne Saúde e Odonto no mesmo arquivo, "
-    "com gráfico e tabela para Top 10 Entradas e Top 10 Saídas."
+    "O PDF reúne Saúde e Odonto, os rankings Top 10 e também "
+    f"uma página individual para cada corretora do filtro atual "
+    f"({quantidade_corretoras_pdf} corretora(s))."
 )
 
-pdf_completo = gerar_pdf_top10_completo(
-    ano_selecionado=ano_selecionado,
-    corretora_selecionada=corretora_selecionada,
-    cnpj_selecionado=cnpj_selecionado,
-    top_entradas_saude=top_entradas_saude,
-    top_saidas_saude=top_saidas_saude,
-    top_entradas_odonto=top_entradas_odonto,
-    top_saidas_odonto=top_saidas_odonto
+# O relatório com uma página por corretora pode ficar grande.
+# Por isso ele só é montado quando o usuário clicar no botão.
+assinatura_base = int(
+    pd.util.hash_pandas_object(
+        df_filtrado,
+        index=True
+    ).sum()
 )
 
-st.download_button(
-    label="📄 Baixar PDF completo - Saúde + Odonto",
-    data=pdf_completo,
-    file_name=(
-        f"relatorio_top10_corretoras_"
-        f"{ano_selecionado}.pdf"
-    ),
-    mime="application/pdf",
+chave_pdf_atual = (
+    int(ano_selecionado),
+    str(corretora_selecionada),
+    str(cnpj_selecionado),
+    assinatura_base
+)
+
+if st.session_state.get("chave_pdf_corretoras") != chave_pdf_atual:
+    st.session_state.pop("pdf_corretoras", None)
+
+if st.button(
+    "⚙️ Gerar PDF completo",
     use_container_width=True
-)
+):
+    with st.spinner(
+        "Gerando o relatório. Como existe uma página por corretora, "
+        "esse processo pode levar alguns segundos..."
+    ):
+        pdf_completo = gerar_pdf_top10_completo(
+            ano_selecionado=ano_selecionado,
+            corretora_selecionada=corretora_selecionada,
+            cnpj_selecionado=cnpj_selecionado,
+            top_entradas_saude=top_entradas_saude,
+            top_saidas_saude=top_saidas_saude,
+            top_entradas_odonto=top_entradas_odonto,
+            top_saidas_odonto=top_saidas_odonto,
+            df_detalhe=df_filtrado
+        )
+
+        st.session_state["pdf_corretoras"] = pdf_completo
+        st.session_state["chave_pdf_corretoras"] = chave_pdf_atual
+
+if "pdf_corretoras" in st.session_state:
+    st.success(
+        "PDF gerado. O relatório já está pronto para download."
+    )
+
+    st.download_button(
+        label="📄 Baixar PDF completo - Saúde + Odonto + Corretoras",
+        data=st.session_state["pdf_corretoras"],
+        file_name=(
+            f"relatorio_corretoras_"
+            f"{ano_selecionado}.pdf"
+        ),
+        mime="application/pdf",
+        use_container_width=True
+    )
+
